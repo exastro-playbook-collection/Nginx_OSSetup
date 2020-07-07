@@ -1,0 +1,3 @@
+---
+VAR_Nginx_status: start
+VAR_Nginx_auto: true

@@ -1,0 +1,135 @@
+---
+# not check `ANSIBLE0006` by ansible-lint
+# not check `COMPLIANCE020201` by ansible-lint
+- name: check param VAR_Nginx_status none
+  fail:
+    msg: "The variable VAR_Nginx_status cannot be NULL."
+  when:
+    - VAR_Nginx_status is defined
+    - VAR_Nginx_status is none
+
+- name: check param VAR_Nginx_status value
+  fail:
+    msg: "The variable VAR_Nginx_status must only be 'start', 'stop', 'reload'."
+  when:
+    - VAR_Nginx_status is defined
+    - VAR_Nginx_status | lower != "start"
+    - VAR_Nginx_status | lower != "reload"
+    - VAR_Nginx_status | lower != "stop"
+
+- name: check param VAR_Nginx_auto
+  fail:
+    msg: "The variable VAR_Nginx_auto type must be boolean."
+  when:
+    - VAR_Nginx_auto is defined
+    - VAR_Nginx_auto != True
+    - VAR_Nginx_auto != False
+
+- name: temporary close selinux
+  command: "setenforce 0"
+  changed_when: true
+
+- name: check which nginx
+  command: "which nginx"
+  changed_when: true
+  register: _which_nginx
+  ignore_errors: yes
+  become: yes
+
+- name: set param _whichNginx
+  set_fact:
+    _whichNginx: "{{ _which_nginx.stdout }}"
+  when: _which_nginx.stdout != ""
+
+- name: set param _whichNginx
+  set_fact:
+    _whichNginx: "{{ _which_nginx.stderr }}"
+  when: _which_nginx.stdout == ""
+
+- name: set nginx.service when systemctl disabled
+  block:
+    - name: query nginx installed
+      shell: "find / -name nginx | grep '/sbin/nginx'"
+      register: nginx_install_state
+      ignore_errors: yes
+
+    - name: fail when nginx uninstalled
+      fail:
+        msg: "Nginx is not installed, please install."
+      when: "'/sbin/nginx' not in nginx_install_state.stdout"
+
+    - name: set param _install_path
+      set_fact:
+        _install_path: "{{ nginx_install_state.stdout | trim }}"
+
+    - name: set nginx to systemctl
+      template:
+        src: "nginx.service.j2"
+        dest: "/usr/lib/systemd/system/nginx.service"
+      become: yes
+
+    - name: Make the file nginx.service effective
+      # command: "systemctl daemon-reload"
+      systemd:
+        daemon_reload: yes
+      become: yes
+  when: "'no nginx in' in _whichNginx"
+
+- name: set nginx status
+  block:
+    - name: check nginx status
+      shell: 'systemctl status nginx.service | grep "Active"'
+      register: nginx_status
+
+    - name: set nginx status
+      set_fact:
+        _isRunning: true
+      when: '"running" in nginx_status.stdout'
+
+    - name: start nginx
+      # command: "systemctl start nginx.service"
+      systemd:
+        name: nginx
+        state: started
+      become: yes
+      when: VAR_Nginx_status|lower == "start"
+
+    - name: reload nginx
+      # command: "systemctl reload nginx.service"
+      systemd:
+        name: nginx
+        state: reloaded
+      become: yes
+      when:
+        - VAR_Nginx_status|lower == "reload"
+        - _isRunning is defined
+        - _isRunning == true
+
+    - name: stop nginx
+      # command: "systemctl stop nginx.service"
+      systemd:
+        name: nginx
+        state: stopped
+      become: yes
+      when: VAR_Nginx_status|lower == "stop"
+  when: VAR_Nginx_status is defined
+
+- name: Set nginx to boot automatically
+  # command: "systemctl enable nginx.service"
+  systemd:
+    name: nginx
+    enabled: yes
+  become: yes
+  when:
+    - VAR_Nginx_auto is defined
+    - VAR_Nginx_auto == true
+
+- name: Set nginx to boot automatically
+  # command: "systemctl disable nginx.service"
+  systemd:
+    name: nginx
+    enabled: no
+  become: yes
+  when:
+    - VAR_Nginx_auto is defined
+    - VAR_Nginx_auto == false
